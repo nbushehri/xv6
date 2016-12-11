@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
+//#include "user.h"
 
 int
 sys_fork(void)
@@ -130,3 +131,21 @@ int sys_signal_restorer(void)
     
     return 0;
 }
+
+int sys_mprotect(void) {
+
+    int addr, len, prot;
+
+    if (argint(0, &addr) < 0)
+        return -1;
+
+    if (argint(1, &len) < 0)
+        return -1;
+
+    if (argint(2, &prot) < 0)
+        return -1;
+
+   mprotect((void *)addr, len, prot);
+   return 0;
+}
+

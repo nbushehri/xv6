@@ -80,10 +80,22 @@ trap(struct trapframe *tf)
    
    case T_DIVIDE:
       if (proc->handlers[SIGFPE] != (sighandler_t) -1) {
-        signal_deliver(SIGFPE);
+        signal_deliver(SIGFPE, proc->sig_info);
         break;
       }
 
+  case T_PGFLT: 
+	cprintf("Delivering T_PGFLT...\n");
+	if(proc->handlers[SIGSEGV] != (sighandler_t) -1) {
+		signal_deliver(SIGSEGV, proc->sig_info);
+		break;
+	}
+  /*case T_GPFLT:
+	cprintf("Delivering T_GPFLT...\n");
+        if(proc->handlers[SIGSEGV] != (sighandler_t) -1) {
+                signal_deliver(SIGSEGV, proc->sig_info);
+                break;
+        }*/
   //PAGEBREAK: 13
   default:
     if(proc == 0 || (tf->cs&3) == 0){

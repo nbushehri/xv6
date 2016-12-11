@@ -19,6 +19,7 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+pte_t *walkpgdir(pde_t *pgdir, const void *va, int alloc);
 
 void
 pinit(void)
@@ -72,6 +73,7 @@ found:
 
   p->handlers[SIGKILL] = (sighandler_t) -1;
   p->handlers[SIGFPE] = (sighandler_t) -1;
+  p->handlers[SIGSEGV] = (sighandler_t) -1; //register SIGSEGV
   p->restorer_addr = -1;
 
   return p;
@@ -468,7 +470,8 @@ procdump(void)
   }
 }
 
-void signal_deliver(int signum)
+//pass in a siginfo_t struct to access the type, address and signal number from the struct
+void signal_deliver(int signum, siginfo_t sig_info)
 {
 	uint old_eip = proc->tf->eip;
 
@@ -476,9 +479,11 @@ void signal_deliver(int signum)
 	*((uint*)(proc->tf->esp - 8))  = proc->tf->eax;			// eax
 	*((uint*)(proc->tf->esp - 12)) = proc->tf->ecx;			// ecx
 	*((uint*)(proc->tf->esp - 16)) = proc->tf->edx;			// edx
-	*((uint*)(proc->tf->esp - 20)) = (uint) signum;			// signal number
-	*((uint*)(proc->tf->esp - 24)) = proc->restorer_addr;	// address of restorer
-	proc->tf->esp -= 24;
+	*((uint*)(proc->tf->esp - 28)) = (uint) signum;			// signal number
+	*((uint*)(proc->tf->esp - 20)) = (uint) sig_info.type;		// protection type (write/read)
+	*((uint*)(proc->tf->esp - 24)) = (uint) sig_info.addr;		// address of the error/signal
+	*((uint*)(proc->tf->esp - 32)) = proc->restorer_addr;		// address of restorer
+	proc->tf->esp -= 32;
 	proc->tf->eip = (uint) proc->handlers[signum];
 }
 
@@ -493,3 +498,50 @@ sighandler_t signal_register_handler(int signum, sighandler_t handler)
 
 	return previous;
 }
+
+//changes start
+//mprotect allows users to set protection levels for memory addresses
+int mprotect(void* addr, int len, int prot) {
+
+	int i;
+	
+	//Check for alignment to a page
+	if((uint)addr % PGSIZE != 0) {
+		cprintf("Cannot align to start of a page!\n");		
+	}
+	
+	//if there are no protections, then you're not supposed to be here
+	if(prot != PROT_READ && prot != PROT_WRITE) {
+		cprintf("Invalid protections...\n");
+		return -1;
+	}
+
+	for(i = 0; i < len; i+= PGSIZE) //traverse by page
+	{
+		//align the address to a page
+		addr = (char*)PGROUNDDOWN((uint)i);
+		pte_t *pte = walkpgdir(proc->pgdir, addr+i, 0);
+		if(((*pte & PTE_U) != 0) && ((*pte & PTE_P) != 0)) {
+			if(prot == PROT_READ) {
+				//cprintf("in prot_read\n");
+				*pte = *pte & (PTE_R);
+				proc->sig_info.type = PROT_READ;
+			}
+			else if(prot == PROT_WRITE) {
+				//cprintf("in prot_write\n");
+				*pte = *pte | (PTE_W);
+                        	proc->sig_info.type = PROT_WRITE;
+			}
+			proc->sig_info.addr = (uint)addr; //set address for signal info
+		}
+		else { 
+			cprintf("Exiting...failed\n");
+			//something went terribly wrong :(
+			return -1;
+		}		
+	}
+	//cprintf("returning 0\n");
+	return 0;
+}
+
+
